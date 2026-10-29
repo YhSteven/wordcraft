@@ -22,6 +22,12 @@ pub struct Prefs {
     pub default_language: Option<String>,
     /// Typing over a selection replaces it; off, the typed text goes in front of it.
     pub typing_replaces_selection: bool,
+    /// A character format applied at a caret inside a word formats the whole word, as Word does
+    /// with "When selecting, automatically select entire word" on (File › Options › Advanced ›
+    /// Editing options). Off, the characters are left alone and only what is typed next takes the
+    /// format. Word reaches this setting on in some installations and off in others (#1418), so it
+    /// is offered here with the long-standing WordCraft behaviour, whole-word, as the default.
+    pub select_entire_word: bool,
     /// The Insert key switches overtype on and off.
     pub insert_key_overtype: bool,
     /// Overtype: typed characters replace the ones after the caret.
@@ -65,6 +71,7 @@ impl Default for Prefs {
             markup: Default::default(),
             print_markup: false,
             typing_replaces_selection: true,
+            select_entire_word: true,
             insert_key_overtype: false,
             overtype: false,
             units: Default::default(),

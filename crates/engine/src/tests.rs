@@ -819,6 +819,41 @@ fn bold_toggles_selection_and_caret_word() {
 }
 
 #[test]
+fn select_entire_word_option_decides_the_caret_format() {
+    // On — the default, and what WordCraft always did: a format at a caret takes the whole word.
+    let mut on = s();
+    run(&mut on, "text.insert", json!({"text": "make this bold"}));
+    run(&mut on, "caret.set", json!({"pos": {"story": "body", "path": [0], "off": 11}}));
+    run(&mut on, "format.italic", json!({}));
+    let p = on.doc.para_at(&Pos::body(0, 0)).unwrap();
+    assert_eq!((p.props_of_char(10).italic, p.props_of_char(13).italic), (Some(true), Some(true)));
+
+    // Off (#1418): the word is left alone and the format is armed for what is typed next.
+    let mut off = s();
+    run(&mut off, "text.insert", json!({"text": "make this bold"}));
+    assert_eq!(
+        run(&mut off, "file.options", json!({"pane": "advanced"}))["selectEntireWord"],
+        json!(true),
+        "on is the default, so preferences saved before this read the same"
+    );
+    run(&mut off, "file.options", json!({"selectEntireWord": false}));
+    run(&mut off, "caret.set", json!({"pos": {"story": "body", "path": [0], "off": 11}}));
+    run(&mut off, "format.italic", json!({}));
+    let p = off.doc.para_at(&Pos::body(0, 0)).unwrap();
+    assert_eq!((p.props_of_char(10).italic, p.props_of_char(13).italic), (None, None), "no character is touched");
+    run(&mut off, "text.insert", json!({"text": "x"}));
+    assert_eq!(off.doc.para_at(&Pos::body(0, 0)).unwrap().props_of_char(11).italic, Some(true), "the next typed character takes it");
+
+    // A selection is formatted either way, and Change Case still takes the word (#1418).
+    run(&mut off, "select.text", json!({"text": "make"}));
+    run(&mut off, "format.italic", json!({}));
+    assert_eq!(off.doc.para_at(&Pos::body(0, 0)).unwrap().props_of_char(1).italic, Some(true));
+    run(&mut off, "caret.set", json!({"pos": {"story": "body", "path": [0], "off": 2}}));
+    run(&mut off, "format.changeCase", json!({"mode": "upper"}));
+    assert!(off.doc.para_at(&Pos::body(0, 0)).unwrap().text.starts_with("MAKE"), "Change Case is not gated by the option");
+}
+
+#[test]
 fn border_toggles_and_saves() {
     use wordcraft_doc::props::Border;
     let border = |s: &Session| s.doc.para_at(&Pos::body(0, 0)).unwrap().props_of_char(5).border;

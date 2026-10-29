@@ -154,6 +154,10 @@ pub fn specs() -> Vec<CommandSpec> {
 
 /// The selection to format: the selection, or the word around a collapsed caret (Word
 /// formats the whole word when the caret is inside one). `None` = caret between words.
+///
+/// Character formats reach this through [`format_target`], which honours `selectEntireWord`.
+/// `format.state` and `format.changeCase` measure with it directly: the caret reads the same with
+/// the setting either way, and Change Case takes the word regardless of it.
 fn target(s: &Session) -> Option<(Pos, Pos)> {
     let (a, b) = s.sel.ordered();
     if a != b {
@@ -170,6 +174,21 @@ fn target(s: &Session) -> Option<(Pos, Pos)> {
         return Some((Pos { off: x, ..a.clone() }, Pos { off: word_end, ..a }));
     }
     None
+}
+
+/// The range a character format applies to: [`target`], unless the caret sits inside a word and
+/// `selectEntireWord` is off (Word's "When selecting, automatically select entire word"). Off, the
+/// characters are left alone and [`apply`] arms the format for what is typed next.
+///
+/// A selection is formatted either way, and the caret's reported format does not depend on the
+/// setting — `format.state` keeps reading [`target`], because Word reads the character before the
+/// caret in both states (issue #1418).
+fn format_target(s: &Session) -> Option<(Pos, Pos)> {
+    let (a, b) = s.sel.ordered();
+    if a == b && !s.prefs.select_entire_word {
+        return None;
+    }
+    target(s)
 }
 
 /// A text box selected as an object (its frame, not text in it): all its text, which Word's Font
@@ -208,7 +227,7 @@ pub fn apply(s: &mut Session, f: &dyn Fn(&mut CharProps)) -> CmdResult {
         }
         return sel_result(s);
     }
-    match selected_text_box(s).or_else(|| target(s)) {
+    match selected_text_box(s).or_else(|| format_target(s)) {
         Some((a, b)) => {
             s.doc.format_range(&a, &b, f)?;
         }
@@ -410,7 +429,7 @@ fn target_has_highlight(s: &Session, h: Highlight) -> bool {
             return true;
         }
     }
-    if let Some((a, b)) = selected_text_box(s).or_else(|| target(s)) {
+    if let Some((a, b)) = selected_text_box(s).or_else(|| format_target(s)) {
         for path in s.doc.paths_between(&a, &b) {
             let Some(p) = s.doc.para(a.story, &path) else { continue };
             let from = if path == a.path { a.off } else { 0 };
@@ -753,7 +772,7 @@ fn convert_chars(src: &str, mode: &str, para_start: bool, turkic: &[bool]) -> Ve
 /// `format.clear` (Clear All Formatting): direct character formatting off and the paragraphs back
 /// to Normal, for the selection or a selected text box's text; at a caret, for what's typed next.
 fn clear(s: &mut Session, _: &Value) -> CmdResult {
-    match selected_text_box(s).or_else(|| target(s)) {
+    match selected_text_box(s).or_else(|| format_target(s)) {
         Some((a, b)) => {
             s.doc.format_range(&a, &b, &|c| *c = c.cleared())?;
             // Clear Formatting also resets the paragraph to Normal.
@@ -774,7 +793,7 @@ fn clear(s: &mut Session, _: &Value) -> CmdResult {
 
 /// Remove direct character formatting, keeping the paragraph and any character style.
 fn reset_char(s: &mut Session, _: &Value) -> CmdResult {
-    match selected_text_box(s).or_else(|| target(s)) {
+    match selected_text_box(s).or_else(|| format_target(s)) {
         Some((a, b)) => s.doc.format_range(&a, &b, &|c| *c = CharProps { style: c.style.clone(), ..c.cleared() })?,
         None => s.pending = Some(CharProps::default()),
     }
