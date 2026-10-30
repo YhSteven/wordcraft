@@ -4,7 +4,7 @@ use wordcraft_proof::cs::install_dictionary;
 mod czech_test_dict;
 
 use serde_json::json;
-use wordcraft_doc::props::BorderStyle;
+use wordcraft_doc::props::{BorderStyle, Highlight};
 use wordcraft_doc::{Pos, StoryRef};
 
 use crate::{Session, cmd};
@@ -819,7 +819,7 @@ fn bold_toggles_selection_and_caret_word() {
 }
 
 #[test]
-fn select_entire_word_option_decides_the_caret_format() {
+fn format_whole_word_at_caret_option_decides_the_caret_format() {
     // On — the default, and what WordCraft always did: a format at a caret takes the whole word.
     let mut on = s();
     run(&mut on, "text.insert", json!({"text": "make this bold"}));
@@ -832,15 +832,22 @@ fn select_entire_word_option_decides_the_caret_format() {
     let mut off = s();
     run(&mut off, "text.insert", json!({"text": "make this bold"}));
     assert_eq!(
-        run(&mut off, "file.options", json!({"pane": "advanced"}))["selectEntireWord"],
+        run(&mut off, "file.options", json!({"pane": "advanced"}))["formatWholeWordAtCaret"],
         json!(true),
         "on is the default, so preferences saved before this read the same"
     );
-    run(&mut off, "file.options", json!({"selectEntireWord": false}));
+    run(&mut off, "file.options", json!({"formatWholeWordAtCaret": false}));
     run(&mut off, "caret.set", json!({"pos": {"story": "body", "path": [0], "off": 11}}));
     run(&mut off, "format.italic", json!({}));
     let p = off.doc.para_at(&Pos::body(0, 0)).unwrap();
     assert_eq!((p.props_of_char(10).italic, p.props_of_char(13).italic), (None, None), "no character is touched");
+    // Armed, and the button reads the armed format — as Word's does at that caret.
+    assert_eq!(run(&mut off, "format.state", json!({}))["italic"], json!(true), "the ribbon shows the format that will be typed");
+    // A second press takes it back off, as Word's does: the arm is a toggle, not a one-way switch.
+    run(&mut off, "format.italic", json!({}));
+    assert_eq!(run(&mut off, "format.state", json!({}))["italic"], json!(false));
+    assert_eq!(off.doc.para_at(&Pos::body(0, 0)).unwrap().props_of_char(10).italic, None, "still no character touched");
+    run(&mut off, "format.italic", json!({}));
     run(&mut off, "text.insert", json!({"text": "x"}));
     assert_eq!(off.doc.para_at(&Pos::body(0, 0)).unwrap().props_of_char(11).italic, Some(true), "the next typed character takes it");
 
@@ -851,6 +858,33 @@ fn select_entire_word_option_decides_the_caret_format() {
     run(&mut off, "caret.set", json!({"pos": {"story": "body", "path": [0], "off": 2}}));
     run(&mut off, "format.changeCase", json!({"mode": "upper"}));
     assert!(off.doc.para_at(&Pos::body(0, 0)).unwrap().text.starts_with("MAKE"), "Change Case is not gated by the option");
+}
+
+#[test]
+fn highlight_at_a_caret_toggles_against_the_armed_format() {
+    // Off (#1418): the caret sits in a highlighted word, but a press there formats nothing until
+    // something is typed — so the first press arms "no highlight" and the second arms the colour
+    // again. Judging by the whole word instead would keep the first press forever.
+    let mut off = s();
+    run(&mut off, "text.insert", json!({"text": "make this bold"}));
+    run(&mut off, "file.options", json!({"formatWholeWordAtCaret": false}));
+    run(&mut off, "select.text", json!({"text": "bold"}));
+    run(&mut off, "format.highlight", json!({"color": "yellow"}));
+    let p = off.doc.para_at(&Pos::body(0, 0)).unwrap();
+    assert_eq!(p.props_of_char(10).highlight, Some(Highlight::Yellow));
+
+    run(&mut off, "caret.set", json!({"pos": {"story": "body", "path": [0], "off": 11}}));
+    assert!(run(&mut off, "format.state", json!({}))["highlight"].is_string(), "the armed format reads the caret's highlight");
+
+    run(&mut off, "format.highlight", json!({}));
+    let p = off.doc.para_at(&Pos::body(0, 0)).unwrap();
+    assert_eq!(p.props_of_char(10).highlight, Some(Highlight::Yellow), "no character is touched");
+    assert_eq!(run(&mut off, "format.state", json!({}))["highlight"], json!(null), "armed with no highlight");
+
+    run(&mut off, "format.highlight", json!({}));
+    assert!(run(&mut off, "format.state", json!({}))["highlight"].is_string(), "the second press arms the colour again");
+    run(&mut off, "text.insert", json!({"text": "x"}));
+    assert_eq!(off.doc.para_at(&Pos::body(0, 0)).unwrap().props_of_char(11).highlight, Some(Highlight::Yellow));
 }
 
 #[test]

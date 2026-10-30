@@ -155,9 +155,8 @@ pub fn specs() -> Vec<CommandSpec> {
 /// The selection to format: the selection, or the word around a collapsed caret (Word
 /// formats the whole word when the caret is inside one). `None` = caret between words.
 ///
-/// Character formats reach this through [`format_target`], which honours `selectEntireWord`.
-/// `format.state` and `format.changeCase` measure with it directly: the caret reads the same with
-/// the setting either way, and Change Case takes the word regardless of it.
+/// Character formats reach this through [`format_target`], which honours
+/// `format_whole_word_at_caret`; `format.changeCase` takes the word regardless of it.
 fn target(s: &Session) -> Option<(Pos, Pos)> {
     let (a, b) = s.sel.ordered();
     if a != b {
@@ -177,15 +176,13 @@ fn target(s: &Session) -> Option<(Pos, Pos)> {
 }
 
 /// The range a character format applies to: [`target`], unless the caret sits inside a word and
-/// `selectEntireWord` is off (Word's "When selecting, automatically select entire word"). Off, the
-/// characters are left alone and [`apply`] arms the format for what is typed next.
+/// `format_whole_word_at_caret` is off. Off, the characters are left alone and [`apply`] arms the
+/// format for what is typed next.
 ///
-/// A selection is formatted either way, and the caret's reported format does not depend on the
-/// setting — `format.state` keeps reading [`target`], because Word reads the character before the
-/// caret in both states (issue #1418).
+/// A selection is formatted either way, and Change Case takes the word regardless.
 fn format_target(s: &Session) -> Option<(Pos, Pos)> {
     let (a, b) = s.sel.ordered();
-    if a == b && !s.prefs.select_entire_word {
+    if a == b && !s.prefs.format_whole_word_at_caret {
         return None;
     }
     target(s)
@@ -249,7 +246,10 @@ pub fn apply(s: &mut Session, f: &dyn Fn(&mut CharProps)) -> CmdResult {
 }
 
 /// Resolved target formatting, sampled up to a paragraph/column-row boundary after 10,000 runs.
-/// Empty targets use pending caret formatting or the selected text box paragraph mark.
+/// No target (a caret between words, or inside a word with `format_whole_word_at_caret` off) reads
+/// the armed format: the pending one, else the run before the caret. That is what Word reports at
+/// such a caret too — within a word it reads the character before the caret (issue #1418), and
+/// after a format is armed there it reads the armed one, so a second press takes it back off.
 fn resolved(s: &Session) -> Vec<ResolvedChar> {
     let mut out = Vec::new();
     if let Some(rows) = column_rows(s) {
@@ -272,7 +272,9 @@ fn resolved(s: &Session) -> Vec<ResolvedChar> {
             return out;
         }
     }
-    let Some((a, b)) = selected_text_box(s).or_else(|| target(s)) else {
+    // Everything a format is judged by has to measure against the same range the format is applied
+    // to: `format.state`, a toggle's on/off decision, the size step and highlight all read here.
+    let Some((a, b)) = selected_text_box(s).or_else(|| format_target(s)) else {
         let f = &s.sel.focus;
         let style = s.doc.para_at(f).and_then(|p| p.props.style.clone());
         out.push(s.doc.styles.resolve_char(style.as_deref(), &s.typing_props()));
@@ -441,7 +443,8 @@ fn target_has_highlight(s: &Session, h: Highlight) -> bool {
             }
         }
     }
-    // No runs: retain the caret/pending and empty text-box paragraph-mark rules.
+    // Nothing to scan (no target, or an empty one): the judgement falls to the same armed format
+    // the button shows, so the press after it takes the colour back off.
     seen || resolved(s).iter().all(|r| r.highlight == h.rgb())
 }
 
